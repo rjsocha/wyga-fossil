@@ -1306,9 +1306,21 @@ static void timeline_y_submenu(int isDisabled){
 ** The "ss" cookie determines the graph style.  See the
 ** timeline_view_styles[] global constant for a list of choices.
 */
+/*
+** SETTING: timeline-default-style  width=4 default=j
+**
+** Default rendering style for the /timeline page when the user has not
+** picked one explicitly.  Values:
+**
+**     m  Modern View
+**     j  Columnar View   (this fork's default)
+**     c  Compact View
+**     v  Verbose View
+**     x  Classic View
+*/
 const char *timeline_default_ss(void){
   static const char *zSs = 0;
-  if( zSs==0 ) zSs = db_get("timeline-default-style","m");
+  if( zSs==0 ) zSs = db_get("timeline-default-style","j");
   return zSs;
 }
 
@@ -1936,7 +1948,11 @@ void page_timeline(void){
   cookie_read_parameter("y","y");
   zType = P("y");
   if( zType==0 ){
-    zType = g.perm.Read ? "ci" : "all";
+    /* Upstream default is "ci" (check-ins only) for users who have Read.
+    ** This fork shows everything by default so timer (type='m') and other
+    ** non-check-in artifacts surface without the user picking "Any Type"
+    ** from the filter dropdown. */
+    zType = "all";
     cgi_set_parameter("y", zType);
   }
   if( zType[0]=='a' ||

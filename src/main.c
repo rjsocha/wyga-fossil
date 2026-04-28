@@ -1183,7 +1183,21 @@ const char *find_repository_option(){
   const char *zRepository = find_option("repository", "R", 1);
   if( zRepository ){
     if( g.zRepositoryOption ) fossil_free(g.zRepositoryOption);
-    g.zRepositoryOption = fossil_strdup(zRepository);
+    /* Fork convenience: if -R points at a directory and that directory
+    ** contains a .fossil file (this fork's per-project convention),
+    ** expand to the file path so all downstream consumers (CLI commands,
+    ** db_open_repository) work the same as if the user had typed it. */
+    if( file_isdir(zRepository, ExtFILE)==1 ){
+      char *zMaybe = mprintf("%s/.fossil", zRepository);
+      if( file_size(zMaybe, ExtFILE)>0 ){
+        g.zRepositoryOption = zMaybe;
+      }else{
+        fossil_free(zMaybe);
+        g.zRepositoryOption = fossil_strdup(zRepository);
+      }
+    }else{
+      g.zRepositoryOption = fossil_strdup(zRepository);
+    }
   }
   return g.zRepositoryOption;
 }
@@ -1892,11 +1906,12 @@ static void process_one_web_page(
       /* Check to see if a file name zRepo exists.  If a file named zRepo
       ** does not exist, szFile will become -1.  If the file does exist,
       ** then szFile will become zero (for an empty file) or positive.
-      ** Special case:  Assume any file with a basename of ".fossil" does
-      ** not exist.
+      ** (Upstream's special-case that assumed any file with a basename
+      ** of ".fossil" does not exist has been dropped in this fork — we
+      ** want to expose those repos.)
       */
       zCleanRepo = file_cleanup_fullpath(zRepo);
-      if( szFile==0 && sqlite3_strglob("*/.fossil",zRepo)!=0 ){
+      if( szFile==0 ){
         szFile = file_size(zCleanRepo, ExtFILE);
         if( szFile>0 && !file_isfile(zCleanRepo, ExtFILE) ){
           /* Only let szFile be non-negative if zCleanRepo really is a file
@@ -3491,6 +3506,25 @@ void cmd_webserver(void){
       fCreate = 0;
       g.argv[2] = 0;
       --g.argc;
+    }
+  }
+  /* Fork convention shortcut: when REPOSITORY is a directory and that
+  ** directory contains a file named ".fossil" (the per-project hidden
+  ** dotfile this fork uses by convention), treat that file as the
+  ** single-repo target instead of letting the directory fall through
+  ** to repolist scan mode.  Lets `fossil ui ~/space/fossil/LAB/test`
+  ** work without spelling out /.fossil.  Skipped when the user
+  ** explicitly asked for repolist mode with --repolist (then we want
+  ** the scan even if .fossil is present). */
+  if( !allowRepoList
+   && 3==g.argc
+   && file_isdir(g.argv[2], ExtFILE)>0
+  ){
+    char *zStorage = mprintf("%s/.fossil", g.argv[2]);
+    if( file_size(zStorage, ExtFILE) > 0 ){
+      g.argv[2] = zStorage;          /* hand off; freed at process exit */
+    }else{
+      fossil_free(zStorage);
     }
   }
   if( isUiCmd && 3==g.argc

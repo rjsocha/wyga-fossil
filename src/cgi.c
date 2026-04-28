@@ -2768,38 +2768,17 @@ int cgi_http_server(
       }
       mxListen = listen4;
 
-      /* If we get here, that means we found an open TCP port at iPort for
-      ** IPv4.  Try to set up a corresponding IPv6 socket on the same port.
-      */
-      memset(&inaddr6, 0, sizeof(inaddr6));
-      inaddr6.sin6_family = AF_INET6;
-      inaddr6.sin6_port = htons(iPort);
-      if( flags & HTTP_SERVER_LOCALHOST ){
-        inaddr6.sin6_addr = in6addr_loopback;
-      }else{
-        inaddr6.sin6_addr = in6addr_any;
-      }
-      listen6 = socket(AF_INET6, SOCK_STREAM, 0);
-      if( listen6>0 ){
-        setsockopt(listen6, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-        setsockopt(listen6, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
-        rc = bind(listen6, (struct sockaddr*)&inaddr6, sizeof(inaddr6));
-        if( rc<0 ){
-          close(listen6);
-          listen6 = -1;
-        }
-      }
-      if( listen6<0 ){
-        zProto = "IPv4 only";
-      }else{
-        zProto = "IPv4 and IPv6";
-        if( listen6>listen4 ) mxListen = listen6;
-      }
+      /* This fork intentionally listens on IPv4 only.  Upstream also
+      ** sets up an IPv6 socket and reports "IPv4 and IPv6" or
+      ** "IPv4 only"; we skip the IPv6 path entirely. */
+      (void)inaddr6;
+      (void)listen6;
+      (void)zProto;
 
-      fossil_print("Listening for %s requests on TCP port %s%d, %s\n",
-                   zRequestType, 
-                   (flags & HTTP_SERVER_LOCALHOST)!=0 ? "localhost:" : "",
-                   iPort, zProto);
+      fossil_print("Listening on http%s://%s:%d\n",
+                   (g.httpUseSSL ? "s" : ""),
+                   (flags & HTTP_SERVER_LOCALHOST)!=0 ? "localhost" : "0.0.0.0",
+                   iPort);
       fflush(stdout);
       break;
     }

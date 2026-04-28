@@ -518,9 +518,20 @@ void vfile_scan(
       char *zPath;
       char *zUtf8;
       if( pEntry->d_name[0]=='.' ){
-        if( (scanFlags & SCAN_ALL)==0 ) continue;
-        if( pEntry->d_name[1]==0 ) continue;
-        if( pEntry->d_name[1]=='.' && pEntry->d_name[2]==0 ) continue;
+        /* Fork: always allow `.fossil` (and `.efossil` under SEE) so
+        ** the repolist scanner can discover hidden-basename repos
+        ** without forcing SCAN_ALL on its consumer. */
+        int isFossilDot =
+            (strcmp(pEntry->d_name, ".fossil")==0)
+#if USE_SEE
+         || (strcmp(pEntry->d_name, ".efossil")==0)
+#endif
+            ;
+        if( !isFossilDot ){
+          if( (scanFlags & SCAN_ALL)==0 ) continue;
+          if( pEntry->d_name[1]==0 ) continue;
+          if( pEntry->d_name[1]=='.' && pEntry->d_name[2]==0 ) continue;
+        }
       }
       zUtf8 = fossil_path_to_utf8(pEntry->d_name);
       blob_appendf(pPath, "/%s", zUtf8);
@@ -641,9 +652,20 @@ int vfile_dir_scan(
       char *zPath;
       char *zUtf8;
       if( pEntry->d_name[0]=='.' ){
-        if( (scanFlags & SCAN_ALL)==0 ) continue;
-        if( pEntry->d_name[1]==0 ) continue;
-        if( pEntry->d_name[1]=='.' && pEntry->d_name[2]==0 ) continue;
+        /* Fork: always allow `.fossil` (and `.efossil` under SEE) so
+        ** the repolist scanner can discover hidden-basename repos
+        ** without forcing SCAN_ALL on its consumer. */
+        int isFossilDot =
+            (strcmp(pEntry->d_name, ".fossil")==0)
+#if USE_SEE
+         || (strcmp(pEntry->d_name, ".efossil")==0)
+#endif
+            ;
+        if( !isFossilDot ){
+          if( (scanFlags & SCAN_ALL)==0 ) continue;
+          if( pEntry->d_name[1]==0 ) continue;
+          if( pEntry->d_name[1]=='.' && pEntry->d_name[2]==0 ) continue;
+        }
       }
       zOrigPath = fossil_strdup(blob_str(pPath));
       zUtf8 = fossil_path_to_utf8(pEntry->d_name);

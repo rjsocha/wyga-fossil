@@ -684,9 +684,9 @@ static const char zDfltMainMenu[] =
 @ Branches  /brlist      o              wideonly
 @ Tags      /taglist     o              wideonly
 @ Forum     /forum       {@2 3 4 5 6}   wideonly
-@ Chat      /chat        C              wideonly
 @ Tickets   /ticket      r              wideonly
 @ Wiki      /wiki        j              wideonly
+@ Timer     /timer       j              wideonly
 @ Admin     /setup       {a s}          desktoponly
 @ Logout    /logout      L              wideonly
 @ Login     /login       !L             wideonly

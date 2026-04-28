@@ -109,16 +109,65 @@ int wiki_prev(int tagid, double mtime){
 }
 
 /*
+** SETTING: home-wiki-page  width=40 default=INDEX
+**
+** Name of the wiki page rendered on /home (and /index, /not_found).
+** The default is "INDEX".  When the page does not exist, /home shows
+** a placeholder with a link to create it, and a link to change this
+** setting.
+*/
+
+/*
+** WEBPAGE: wikidesc
+**
+** Set or clear the per-page description (fork extension).  Expects
+** POST with parameters name and description.  Redirects back to
+** the wiki page.  Empty description clears the entry.
+*/
+void wikidesc_page(void){
+  const char *zName;
+  const char *zDesc;
+  login_check_credentials();
+  if( !g.perm.WrWiki ){
+    login_needed(g.anon.WrWiki);
+    return;
+  }
+  if( !cgi_csrf_safe(2) ){
+    cgi_redirectf("%R/home");
+    return;
+  }
+  zName = P("name");
+  zDesc = P("description");
+  if( zName==0 || zName[0]==0 ){
+    cgi_redirectf("%R/home");
+    return;
+  }
+  if( zDesc==0 || zDesc[0]==0 ){
+    db_multi_exec("DELETE FROM wiki_meta WHERE name=%Q", zName);
+  }else{
+    db_multi_exec(
+      "INSERT INTO wiki_meta(name,description) VALUES(%Q,%Q)"
+      " ON CONFLICT(name) DO UPDATE SET description=excluded.description",
+      zName, zDesc);
+  }
+  cgi_redirectf("%R/wiki?name=%T", zName);
+}
+
+/*
 ** WEBPAGE: home
 ** WEBPAGE: index
 ** WEBPAGE: not_found
 **
 ** The /home, /index, and /not_found pages all redirect to the homepage
-** configured by the administrator.
+** configured by the administrator.  By default that homepage is the
+** wiki page named by the "home-wiki-page" setting (default: "INDEX").
+** If the setting "index-page" is non-empty it overrides this and is
+** used as a literal redirect target instead.
 */
 void home_page(void){
-  char *zPageName = db_get("project-name",0);
+  char *zPageName = db_get("home-wiki-page", "INDEX");
   char *zIndexPage = db_get("index-page",0);
+  int rid = 0;
   login_check_credentials();
   cgi_check_for_malice();
   if( zIndexPage ){
@@ -133,22 +182,77 @@ void home_page(void){
   if( !g.perm.RdWiki ){
     cgi_redirectf("%R/login?g=home");
   }
-  if( zPageName ){
-    login_check_credentials();
-    g.zExtra = zPageName;
-    cgi_set_parameter_nocopy("name", g.zExtra, 1);
-    g.isHome = 1;
-    wiki_page();
-    return;
+  if( zPageName && zPageName[0] ){
+    char *zTag = mprintf("wiki-%s", zPageName);
+    rid = db_int(0,
+      "SELECT rid FROM tagxref"
+      " WHERE tagid=(SELECT tagid FROM tag WHERE tagname=%Q)"
+      " ORDER BY mtime DESC", zTag);
+    fossil_free(zTag);
+    if( rid>0 ){
+      g.zExtra = zPageName;
+      cgi_set_parameter_nocopy("name", g.zExtra, 1);
+      g.isHome = 1;
+      wiki_page();
+      return;
+    }
   }
+  /* Page is not configured or not yet created - render an auto-index
+  ** listing all existing wiki pages, plus a hint about creating the
+  ** explicit home page. */
   style_set_current_feature("wiki");
   style_header("Home");
-  @ <p>This is a stub home-page for the project.
-  @ To fill in this page, first go to
-  @ %z(href("%R/setup_config"))setup/config</a>
-  @ and establish a "Project Name".  Then create a
-  @ wiki page with that name.  The content of that wiki page
-  @ will be displayed in place of this message.</p>
+  {
+    Stmt q;
+    int hasAny = 0;
+    /* DISTINCT name dedups across versions/revisions of the same page. */
+    db_prepare(&q,
+      "SELECT DISTINCT substr(t.tagname,6) AS name, "
+      "       (SELECT description FROM wiki_meta "
+      "         WHERE name=substr(t.tagname,6)) AS descr "
+      "  FROM tag t JOIN tagxref tx USING(tagid) "
+      " WHERE t.tagname GLOB 'wiki-*' "
+      "   AND TYPEOF(tx.value+0)='integer' "
+      " ORDER BY name COLLATE NOCASE");
+    while( db_step(&q)==SQLITE_ROW ){
+      const char *zName = db_column_text(&q, 0);
+      const char *zDesc = db_column_text(&q, 1);
+      if( !hasAny ){
+        @ <h2>Wiki pages</h2>
+        @ <table border="1" cellpadding="6" cellspacing="0"
+        @        style="border-collapse:collapse">
+        @ <thead>
+        @   <tr style="background:#e8eef5">
+        @     <th>Name</th><th>Description</th>
+        @   </tr>
+        @ </thead>
+        @ <tbody>
+        hasAny = 1;
+      }
+      /* Inline background defeats the skin's body.wiki tr:nth-child(odd)
+      ** zebra rule that would otherwise alternate row colors. */
+      @ <tr style="background:#fafafa">
+      @   <td>%z(href("%R/wiki?name=%T", zName))%h(zName)</a></td>
+      @   <td>%h(zDesc?zDesc:"")</td>
+      @ </tr>
+    }
+    if( hasAny ){
+      @ </tbody></table>
+    }
+    db_finalize(&q);
+    if( !hasAny ){
+      @ <p>This repository has no wiki pages yet.</p>
+    }
+  }
+  @ <p style="color:#666; font-size:small">
+  @   No wiki page named
+  @   <b>%h(zPageName ? zPageName : "INDEX")</b>
+  @   exists; this auto-index is shown instead.
+  @   %z(href("%R/wikiedit?name=%T", zPageName ? zPageName : "INDEX"))Create it</a>
+  @   to take over the home page, or change the default in
+  @   %z(href("%R/setup_config"))settings</a>
+  @   (<code>home-wiki-page</code>).
+  @ </p>
   style_finish_page();
 }
 
@@ -634,6 +738,32 @@ void wiki_page(void){
     wiki_page_header(WIKITYPE_UNKNOWN, zPageName, "");
     if( !noSubmenu ){
       wiki_standard_submenu(submenuFlags);
+    }
+    /* Description editor (fork extension).  Visible to anyone with
+    ** write-wiki permission; everyone else sees the value read-only. */
+    if( !isSandbox ){
+      char *zDesc = db_text(0,
+        "SELECT description FROM wiki_meta WHERE name=%Q", zPageName);
+      if( g.perm.WrWiki ){
+        @ <form action="%R/wikidesc" method="POST"
+        @       style="margin:6px 0; padding:6px; background:#f5f5f5;
+        @              border:1px solid #ddd; border-radius:3px;
+        @              font-size:90%%">
+        login_insert_csrf_secret();
+        @   <input type="hidden" name="name" value="%h(zPageName)">
+        @   <label>Description:
+        @     <input type="text" name="description"
+        @            value="%h(zDesc?zDesc:"")"
+        @            placeholder="short summary shown on /home auto-index"
+        @            style="width:60%%"></label>
+        @   <button type="submit">save</button>
+        @ </form>
+      }else if( zDesc && zDesc[0] ){
+        @ <p style="font-size:90%%; color:#555">
+        @   <i>%h(zDesc)</i>
+        @ </p>
+      }
+      fossil_free(zDesc);
     }
   }
   if( zBody[0]==0 ){
@@ -1569,6 +1699,7 @@ void wikiedit_page(void){
 void wikinew_page(void){
   const char *zName;
   const char *zMimetype;
+  const char *zDescription;
   login_check_credentials();
   if( !g.perm.NewWiki ){
     login_needed(g.anon.NewWiki);
@@ -1576,7 +1707,17 @@ void wikinew_page(void){
   }
   zName = PD("name","");
   zMimetype = wiki_filter_mimetypes(P("mimetype"));
+  zDescription = P("description");
   if( zName[0] && wiki_name_is_wellformed((const unsigned char *)zName) ){
+    /* Save the description (fork extension) before handing off to the
+    ** wikiedit SPA.  wikiedit doesn't know about wiki_meta and we don't
+    ** want to thread the description through its JS-side state. */
+    if( zDescription && zDescription[0] ){
+      db_multi_exec(
+        "INSERT INTO wiki_meta(name,description) VALUES(%Q,%Q)"
+        " ON CONFLICT(name) DO UPDATE SET description=excluded.description",
+        zName, zDescription);
+    }
     cgi_redirectf("wikiedit?name=%T&mimetype=%s", zName, zMimetype);
   }
   style_set_current_feature("wiki");
@@ -1587,6 +1728,10 @@ void wikinew_page(void){
   form_begin(0, "%R/wikinew");
   @ <p>Name of new wiki page:
   @ <input style="width: 35;" type="text" name="name" value="%h(zName)"><br>
+  @ Description (optional, shown in /home auto-index):<br>
+  @ <input style="width: 60%%;" type="text" name="description"
+  @        value="%h(zDescription?zDescription:"")"
+  @        placeholder="short summary"><br>
   @ %z(href("%R/markup_help"))Markup style</a>:
   mimetype_option_menu("text/x-markdown", "mimetype");
   @ <br><input type="submit" value="Create">
@@ -1960,7 +2105,7 @@ static const char listAllWikiPages[] =
 @ WHERE
 @   tag.tagname GLOB 'wiki-*'
 @   AND tagxref.tagid=tag.tagid
-@   AND TYPEOF(wrid)='integer' -- only wiki- tags which are wiki pages
+@   AND TYPEOF(wrid)='integer' /* only wiki- tags which are wiki pages */
 @ GROUP BY 1
 @ ORDER BY 2;
 ;
@@ -2198,7 +2343,7 @@ int wiki_technote_to_rid(const char *zETime) {
 /*
 ** COMMAND: wiki*
 **
-** Usage: %fossil wiki (export|create|commit|list) WikiName
+** Usage: %fossil wiki (export|create|commit|list|index|desc|purge) ARGS
 **
 ** Run various subcommands to work with wiki entries or tech notes.
 **
@@ -2257,6 +2402,38 @@ int wiki_technote_to_rid(const char *zETime) {
 **         --technote-tags TAGS        The set of tags for a technote.
 **         --technote-bgcolor COLOR    The color used for the technote
 **                                     on the timeline.
+**         -b|--body TEXT              Inline body content.  Mutually
+**                                     exclusive with FILE.  Convenient
+**                                     for one-shot agent invocation.
+**         -d|--description TEXT       Set/update the per-page short
+**                                     description (fork extension,
+**                                     non-syncing).  Empty value clears.
+**                                     Ignored for tech notes.
+**
+** > fossil wiki purge PAGENAME ?--obliterate?
+**
+**       Permanently delete every revision of a wiki page along with
+**       its description metadata.  By default the artifacts go to
+**       fossil's graveyard ("fossil purge undo" can restore them).
+**       With --obliterate the graveyard is emptied too, making the
+**       deletion irreversible.  CLI-only operation; no /wiki UI
+**       surface exposes it.
+**
+** > fossil wiki index ?--format md|plain?
+**
+**       Print the auto-index of wiki pages.  Default format is
+**       Markdown (`- [Name](/wiki?name=Name) - description`).
+**       Use `--format plain` for TAB-separated `name\tdescription`
+**       (or just `name` when there's no description).
+**
+** > fossil wiki desc PAGENAME ?DESCRIPTION?
+**
+**       Get or set the page's short description (fork extension).
+**       With no DESCRIPTION argument, prints the current value.
+**       With "" as DESCRIPTION, clears the description.
+**       The description is shown next to the page name on /home's
+**       auto-index.  Stored in repository-local table wiki_meta;
+**       not synced through fossil's HTTP sync.
 **
 ** > fossil wiki list ?OPTIONS?
 ** > fossil wiki ls ?OPTIONS?
@@ -2414,14 +2591,50 @@ void wiki_cmd(void){
     const char *zETime = find_option("technote", "t", 1);
     const char *zTags = find_option("technote-tags", NULL, 1);
     const char *zClr = find_option("technote-bgcolor", NULL, 1);
+    const char *zBody = find_option("body", "b", 1);
+    const char *zDescription = find_option("description", "d", 1);
     verify_all_options();
-    if( g.argc!=4 && g.argc!=5 ){
+    if( g.argc<4 || g.argc>5 ){
       usage("commit|create PAGENAME ?FILE? [--mimetype TEXT-FORMAT]"
             " [--technote DATETIME] [--technote-tags TAGS]"
-            " [--technote-bgcolor COLOR]");
+            " [--technote-bgcolor COLOR] [-b|--body TEXT]"
+            " [-d|--description TEXT]");
     }
     zPageName = g.argv[3];
-    if( g.argc==4 ){
+    if( zBody ){
+      /* Inline body via flag wins over FILE/stdin so the agent can do
+      ** everything in one shell line: fossil wiki create NAME --body TEXT.
+      ** Common backslash escapes are decoded so callers don't have to
+      ** wrestle with their shell's quoting to insert newlines:
+      **   \n -> LF, \r -> CR, \t -> TAB, \0 -> NUL, \\ -> backslash.
+      ** Anything else after a backslash is passed through verbatim. */
+      Blob decoded = empty_blob;
+      const char *p = zBody;
+      while( *p ){
+        if( p[0]=='\\' && p[1] ){
+          char c = p[1];
+          switch( c ){
+            case 'n':  blob_append_char(&decoded, '\n'); break;
+            case 'r':  blob_append_char(&decoded, '\r'); break;
+            case 't':  blob_append_char(&decoded, '\t'); break;
+            case '0':  blob_append_char(&decoded, '\0'); break;
+            case '\\': blob_append_char(&decoded, '\\'); break;
+            default:
+              blob_append_char(&decoded, '\\');
+              blob_append_char(&decoded, c);
+              break;
+          }
+          p += 2;
+        }else{
+          blob_append_char(&decoded, *p);
+          p++;
+        }
+      }
+      content = decoded;  /* transfer */
+      if( g.argc==5 ){
+        fossil_fatal("--body and FILE arguments are mutually exclusive");
+      }
+    }else if( g.argc==4 ){
       blob_read_from_channel(&content, stdin, -1);
     }else{
       blob_read_from_file(&content, g.argv[4], ExtFILE);
@@ -2445,6 +2658,13 @@ void wiki_cmd(void){
                                        "text/x-fossil-wiki"));
       }else if( pWiki!=0 && (pWiki->zMimetype && *pWiki->zMimetype) ){
         zMimeType = pWiki->zMimetype;
+      }
+      /* Fork default for brand-new pages from CLI: markdown.  Upstream
+      ** falls back to text/x-fossil-wiki silently inside wiki_cmd_commit;
+      ** we want agents and humans driving the CLI to land in markdown
+      ** unless they explicitly pick another format. */
+      if( !zMimeType || !*zMimeType ){
+        zMimeType = "text/x-markdown";
       }
     }else{
       zMimeType = wiki_filter_mimetypes(zMimeType);
@@ -2495,8 +2715,143 @@ void wiki_cmd(void){
         fossil_fatal("ambiguous tech note id: %s", zETime);
       }
     }
+    /* Apply --description if supplied (fork extension).  Empty string
+    ** clears the entry.  Sandbox and tech notes are skipped - the
+    ** wiki_meta table is keyed by wiki page name only. */
+    if( zDescription && !isSandbox && !zETime ){
+      if( zDescription[0]==0 ){
+        db_multi_exec("DELETE FROM wiki_meta WHERE name=%Q", zPageName);
+      }else{
+        db_multi_exec(
+          "INSERT INTO wiki_meta(name,description) VALUES(%Q,%Q)"
+          " ON CONFLICT(name) DO UPDATE SET description=excluded.description",
+          zPageName, zDescription);
+      }
+    }
     manifest_destroy(pWiki);
     blob_reset(&content);
+  }else if( strncmp(g.argv[2],"purge",n)==0 ){
+    /* fossil wiki purge PAGENAME ?--obliterate?
+    ** Permanently remove every revision of a wiki page (CLI only - no
+    ** UI surface).  Wraps fossil's purge_artifact_list() over all
+    ** rids tagged 'wiki-PAGENAME'.  --obliterate also empties the
+    ** graveyard so undo is impossible. */
+    const char *zPage;
+    int obliterate = find_option("obliterate", 0, 0)!=0;
+    int n2 = 0;
+    Stmt q2;
+    char *zTag;
+    verify_all_options();
+    if( g.argc!=4 ){
+      usage("purge PAGENAME ?--obliterate?");
+    }
+    zPage = g.argv[3];
+    zTag = mprintf("wiki-%s", zPage);
+    db_begin_transaction();
+    db_multi_exec(
+      "DROP TABLE IF EXISTS wikipurgelist;"
+      "DROP TABLE IF EXISTS wikipurgelist_tickets;"
+      "DROP TABLE IF EXISTS wikipurgelist_files;"
+      "DROP TABLE IF EXISTS wikipurgelist_tags;"
+      "CREATE TEMP TABLE wikipurgelist(id INTEGER PRIMARY KEY);");
+    db_prepare(&q2,
+      "SELECT rid FROM tagxref "
+      " WHERE tagid=(SELECT tagid FROM tag WHERE tagname=%Q)",
+      zTag);
+    while( db_step(&q2)==SQLITE_ROW ){
+      db_multi_exec("INSERT OR IGNORE INTO wikipurgelist VALUES(%d);",
+                    db_column_int(&q2, 0));
+      n2++;
+    }
+    db_finalize(&q2);
+    if( n2==0 ){
+      fossil_free(zTag);
+      db_end_transaction(0);
+      fossil_fatal("no wiki page named: %s", zPage);
+    }
+    /* Default mode moves artifacts into the graveyard so 'fossil purge
+    ** undo' can restore them.  --obliterate skips the graveyard hop
+    ** entirely, making the deletion irreversible at this layer. */
+    purge_artifact_list("wikipurgelist",
+                        obliterate ? "wiki purge --obliterate" : "wiki purge",
+                        obliterate ? 0 : PURGE_MOVETO_GRAVEYARD);
+    /* Also drop the per-page metadata. */
+    db_multi_exec("DELETE FROM wiki_meta WHERE name=%Q", zPage);
+    db_end_transaction(0);
+    fossil_free(zTag);
+    fossil_print("purged %d revision(s) of '%s'\n", n2, zPage);
+    if( obliterate ){
+      fossil_print("graveyard skipped: page is unrecoverable\n");
+    }else{
+      fossil_print("(use 'fossil purge undo' to restore)\n");
+    }
+  }else if( strncmp(g.argv[2],"index",n)==0 ){
+    /* fossil wiki index ?--format md|plain?
+    ** Emit the auto-index of wiki pages, one per line.  Default
+    ** format is Markdown bullet list with description suffix. */
+    const char *zFormat = find_option("format", "f", 1);
+    Stmt q;
+    int isPlain = (zFormat && fossil_strcmp(zFormat,"plain")==0);
+    verify_all_options();
+    db_prepare(&q,
+      "SELECT DISTINCT substr(t.tagname,6) AS name, "
+      "       (SELECT description FROM wiki_meta "
+      "         WHERE name=substr(t.tagname,6)) AS descr "
+      "  FROM tag t JOIN tagxref tx USING(tagid) "
+      " WHERE t.tagname GLOB 'wiki-*' "
+      "   AND TYPEOF(tx.value+0)='integer' "
+      " ORDER BY name COLLATE NOCASE");
+    if( !isPlain ){
+      fossil_print("| Name | Description |\n");
+      fossil_print("|------|-------------|\n");
+    }
+    while( db_step(&q)==SQLITE_ROW ){
+      const char *zName = db_column_text(&q, 0);
+      const char *zDesc = db_column_text(&q, 1);
+      if( isPlain ){
+        if( zDesc && zDesc[0] ){
+          fossil_print("%s - %s\n", zName, zDesc);
+        }else{
+          fossil_print("%s\n", zName);
+        }
+      }else{
+        fossil_print("| %s | %s |\n",
+                     zName,
+                     (zDesc && zDesc[0]) ? zDesc : "");
+      }
+    }
+    db_finalize(&q);
+  }else if( strncmp(g.argv[2],"desc",n)==0 ){
+    /* Get/set the per-page description (fork extension).
+    **    fossil wiki desc PAGENAME              -> print current description
+    **    fossil wiki desc PAGENAME "TEXT"       -> set description
+    **    fossil wiki desc PAGENAME ""           -> clear description
+    */
+    const char *zPage;
+    if( g.argc<4 || g.argc>5 ){
+      usage("desc PAGENAME ?DESCRIPTION?");
+    }
+    zPage = g.argv[3];
+    if( g.argc==4 ){
+      char *zDesc = db_text(0,
+        "SELECT description FROM wiki_meta WHERE name=%Q", zPage);
+      if( zDesc && zDesc[0] ){
+        fossil_print("%s\n", zDesc);
+      }
+      fossil_free(zDesc);
+    }else{
+      const char *zDesc = g.argv[4];
+      if( zDesc[0]==0 ){
+        db_multi_exec("DELETE FROM wiki_meta WHERE name=%Q", zPage);
+        fossil_print("description for '%s' cleared\n", zPage);
+      }else{
+        db_multi_exec(
+          "INSERT INTO wiki_meta(name,description) VALUES(%Q,%Q)"
+          " ON CONFLICT(name) DO UPDATE SET description=excluded.description",
+          zPage, zDesc);
+        fossil_print("description for '%s' set\n", zPage);
+      }
+    }
   }else if( strncmp(g.argv[2],"delete",n)==0 ){
     if( g.argc!=4 ){
       usage("delete PAGENAME");
@@ -2547,7 +2902,7 @@ void wiki_cmd(void){
   return;
 
 wiki_cmd_usage:
-  usage("export|create|commit|list ...");
+  usage("export|create|commit|list|index|desc|purge ...");
 }
 
 /*

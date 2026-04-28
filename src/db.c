@@ -3357,6 +3357,41 @@ void create_repository_cmd(void){
     usage("REPOSITORY-NAME");
   }
 
+  /* Fork convenience: REPOSITORY-NAME may be a directory (existing or
+  ** not).  Heuristic:
+  **    - if the path exists and is a directory → place .fossil inside
+  **    - if the path does not exist:
+  **        * if it ends in ".fossil" → treat as a regular file path
+  **          (and mkdir -p the parents)
+  **        * otherwise → mkdir the directory and place .fossil inside
+  **    - if the path exists and is a file → original behaviour
+  ** Net result: `fossil init ~/space/fossil/LAB/test` creates
+  ** ~/space/fossil/LAB/test/.fossil. */
+  {
+    int existsKind = file_isdir(g.argv[2], ExtFILE);
+    int hasFossilExt;
+    int n = (int)strlen(g.argv[2]);
+    hasFossilExt = (n>=7 && fossil_strcmp(&g.argv[2][n-7], ".fossil")==0);
+
+    if( existsKind==1 ){
+      /* Existing directory: create <DIR>/.fossil inside */
+      g.argv[2] = mprintf("%s/.fossil", g.argv[2]);
+    }else if( existsKind==0 && !hasFossilExt ){
+      /* Path does not exist and is not a *.fossil file path: create
+      ** the directory tree and place .fossil inside.  file_mkfolder()
+      ** creates the parent dirs of its argument, so passing the
+      ** target file path itself causes the directory to be created. */
+      char *zFile = mprintf("%s/.fossil", g.argv[2]);
+      if( file_mkfolder(zFile, ExtFILE, 0, 0)!=0 ){
+        fossil_fatal("could not create directory: %s", g.argv[2]);
+      }
+      g.argv[2] = zFile;
+    }else if( existsKind==0 && hasFossilExt ){
+      /* *.fossil path that does not yet exist: ensure parent exists. */
+      file_mkfolder(g.argv[2], ExtFILE, 0, 1);
+    }
+  }
+
   if( -1 != file_size(g.argv[2], ExtFILE) ){
     fossil_fatal("file already exists: %s", g.argv[2]);
   }

@@ -37,6 +37,7 @@
 #define CFTYPE_ATTACHMENT 6
 #define CFTYPE_EVENT      7
 #define CFTYPE_FORUM      8
+#define CFTYPE_TIMER      9
 
 /*
 ** File permissions used by Fossil internally.
@@ -88,6 +89,7 @@ struct Manifest {
   char *zAttachTarget;  /* Ticket or wiki that attachment applies to.  A card */
   char *zThreadRoot;    /* Thread root artifact.  G card */
   char *zInReplyTo;     /* Forum in-reply-to artifact.  I card */
+  char *zTimerAction;   /* Timer action: "start" or "stop". Y card */
   int nFile;            /* Number of F cards */
   int nFileAlloc;       /* Slots allocated in aFile[] */
   int iFile;            /* Index of current file in iterator */
@@ -137,6 +139,7 @@ static struct {
   /* CFTYPE_ATTACHMENT 6 */ { "ACDNUZ",        "ADZ"         },
   /* CFTYPE_EVENT      7 */ { "CDENPTUWZ",     "DEWZ"        },
   /* CFTYPE_FORUM      8 */ { "DGHINPUWZ",     "DUWZ"        },
+  /* CFTYPE_TIMER      9 */ { "CDUYZ",         "DUYZ"        },
 };
 
 /*
@@ -150,7 +153,8 @@ static const char *const azNameOfMType[] = {
   "ticket",
   "attachment",
   "technote",
-  "forum post"
+  "forum post",
+  "timer"
 };
 
 /*
@@ -1046,6 +1050,28 @@ Manifest *manifest_parse(Blob *pContent, int rid, Blob *pErr){
         break;
       }
 
+
+      /*
+      **     Y <action>
+      **
+      ** Identify this artifact as a timer event.  <action> must be one
+      ** of "start" or "stop".  Only one Y line is allowed.  Presence of
+      ** a Y card forces the artifact type to CFTYPE_TIMER.
+      */
+      case 'Y': {
+        if( p->zTimerAction!=0 ) SYNTAX("more than one Y-card");
+        p->zTimerAction = next_token(&x, 0);
+        if( p->zTimerAction==0 ) SYNTAX("missing action on Y-card");
+        if( fossil_strcmp(p->zTimerAction,"start")!=0
+         && fossil_strcmp(p->zTimerAction,"stop")!=0 ){
+          SYNTAX("invalid Y-card action (must be 'start' or 'stop')");
+        }
+        if( p->type!=0 && p->type!=CFTYPE_TIMER ){
+          SYNTAX("Y-card combined with cards from another artifact type");
+        }
+        p->type = CFTYPE_TIMER;
+        break;
+      }
 
       /*
       **     Z <md5sum>
@@ -2629,6 +2655,49 @@ int manifest_crosslink(int rid, Blob *pContent, int flags){
     }
     db_finalize(&qatt);
   }
+  if( p->type==CFTYPE_TIMER ){
+    /* Timer sessions: timer table holds full session state inline;
+    ** event table receives one row per operation so the timeline acts
+    ** as a complete log (start, stop, future edits etc. each visible). */
+    const char *zComment;
+    if( p->zComment && p->zComment[0] ){
+      zComment = p->zComment;
+    }else if( fossil_strcmp(p->zTimerAction,"start")==0 ){
+      zComment = "timer started";
+    }else{
+      zComment = "timer stopped";
+    }
+    if( fossil_strcmp(p->zTimerAction,"start")==0 ){
+      db_multi_exec(
+        "INSERT OR REPLACE INTO timer"
+        "  (rid, start_mtime, stop_rid, stop_mtime, comment) "
+        "  VALUES(%d, %.17g, NULL, NULL, %Q);",
+        rid, p->rDate, zComment);
+      db_multi_exec(
+        "REPLACE INTO event(type,mtime,objid,user,comment,bgcolor)"
+        " VALUES('m',%.17g,%d,%Q,%Q,'#dfd');",
+        p->rDate, rid, p->zUser, zComment);
+    }else{
+      /* Close the most recent open session.  Use the row with the
+      ** latest start_mtime among those with NULL stop_rid. */
+      int openRid = db_int(0,
+        "SELECT rid FROM timer "
+        " WHERE stop_rid IS NULL "
+        " ORDER BY start_mtime DESC, rid DESC LIMIT 1");
+      if( openRid>0 ){
+        db_multi_exec(
+          "UPDATE timer SET stop_rid=%d, stop_mtime=%.17g, comment=%Q "
+          " WHERE rid=%d;",
+          rid, p->rDate, zComment, openRid);
+      }
+      /* Always log the stop on the timeline, even if no matching
+      ** open session was found (operator should see the orphan). */
+      db_multi_exec(
+        "REPLACE INTO event(type,mtime,objid,user,comment,bgcolor)"
+        " VALUES('m',%.17g,%d,%Q,%Q,'#fdd');",
+        p->rDate, rid, p->zUser, zComment);
+    }
+  }
   if( p->type==CFTYPE_ATTACHMENT ){
     char *zComment = 0;
     const char isAdd = (p->zAttachSrc && p->zAttachSrc[0]) ? 1 : 0;
@@ -2930,6 +2999,7 @@ const char * artifact_type_to_name(int typeId){
     case CFTYPE_ATTACHMENT: return "attachment";
     case CFTYPE_EVENT: return "technote";
     case CFTYPE_FORUM: return "forumpost";
+    case CFTYPE_TIMER: return "timer";
   }
   return NULL;
 }

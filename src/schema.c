@@ -324,6 +324,27 @@ const char zRepositorySchema2[] =
 @ );
 @ CREATE INDEX event_i1 ON event(mtime);
 @
+@ -- Per-wiki-page metadata (fork extension).  This table is local to
+@ -- the repository and is NOT synced through fossil's HTTP sync — it
+@ -- relies on filesystem-level replication.  Currently just holds a
+@ -- short human-readable description used by the auto-index on /home.
+@ CREATE TABLE wiki_meta(
+@   name        TEXT PRIMARY KEY,
+@   description TEXT
+@ );
+@
+@ -- Timer sessions.  One row per session, holding the session's full
+@ -- state inline.  Updated by manifest_crosslink when start (insert)
+@ -- and stop (update) artifacts arrive.  Each operation also writes a
+@ -- row into EVENT (type='m') so the timeline doubles as an audit log.
+@ CREATE TABLE timer(
+@   rid INTEGER PRIMARY KEY REFERENCES blob, -- start artifact rid
+@   start_mtime REAL NOT NULL,               -- when the timer started (julianday)
+@   stop_rid INTEGER,                        -- stop artifact rid (NULL=running)
+@   stop_mtime REAL,                         -- when the timer stopped
+@   comment TEXT                             -- last-known comment (start or stop)
+@ );
+@
 @ -- A record of phantoms.  A phantom is a record for which we know the
 @ -- file hash but we do not (yet) know the file content.
 @ --

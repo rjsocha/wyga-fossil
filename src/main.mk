@@ -146,6 +146,7 @@ SRC = \
   $(SRCDIR)/terminal.c \
   $(SRCDIR)/th_main.c \
   $(SRCDIR)/timeline.c \
+  $(SRCDIR)/timer.c \
   $(SRCDIR)/tkt.c \
   $(SRCDIR)/tktsetup.c \
   $(SRCDIR)/undo.c \
@@ -415,6 +416,7 @@ TRANS_SRC = \
   $(OBJDIR)/terminal_.c \
   $(OBJDIR)/th_main_.c \
   $(OBJDIR)/timeline_.c \
+  $(OBJDIR)/timer_.c \
   $(OBJDIR)/tkt_.c \
   $(OBJDIR)/tktsetup_.c \
   $(OBJDIR)/undo_.c \
@@ -567,6 +569,7 @@ OBJ = \
  $(OBJDIR)/terminal.o \
  $(OBJDIR)/th_main.o \
  $(OBJDIR)/timeline.o \
+ $(OBJDIR)/timer.o \
  $(OBJDIR)/tkt.o \
  $(OBJDIR)/tktsetup.o \
  $(OBJDIR)/undo.o \
@@ -915,6 +918,7 @@ $(OBJDIR)/headers:	$(OBJDIR)/page_index.h $(OBJDIR)/builtin_data.h $(OBJDIR)/mak
 	$(OBJDIR)/terminal_.c:$(OBJDIR)/terminal.h \
 	$(OBJDIR)/th_main_.c:$(OBJDIR)/th_main.h \
 	$(OBJDIR)/timeline_.c:$(OBJDIR)/timeline.h \
+	$(OBJDIR)/timer_.c:$(OBJDIR)/timer.h \
 	$(OBJDIR)/tkt_.c:$(OBJDIR)/tkt.h \
 	$(OBJDIR)/tktsetup_.c:$(OBJDIR)/tktsetup.h \
 	$(OBJDIR)/undo_.c:$(OBJDIR)/undo.h \
@@ -1982,6 +1986,14 @@ $(OBJDIR)/timeline.o:	$(OBJDIR)/timeline_.c $(OBJDIR)/timeline.h $(SRCDIR)/confi
 	$(XTCC) -o $(OBJDIR)/timeline.o -c $(OBJDIR)/timeline_.c
 
 $(OBJDIR)/timeline.h:	$(OBJDIR)/headers
+
+$(OBJDIR)/timer_.c:	$(SRCDIR)/timer.c $(OBJDIR)/translate
+	$(OBJDIR)/translate $(SRCDIR)/timer.c >$@
+
+$(OBJDIR)/timer.o:	$(OBJDIR)/timer_.c $(OBJDIR)/timer.h $(SRCDIR)/config.h
+	$(XTCC) -o $(OBJDIR)/timer.o -c $(OBJDIR)/timer_.c
+
+$(OBJDIR)/timer.h:	$(OBJDIR)/headers
 
 $(OBJDIR)/tkt_.c:	$(SRCDIR)/tkt.c $(OBJDIR)/translate
 	$(OBJDIR)/translate $(SRCDIR)/tkt.c >$@

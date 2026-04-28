@@ -179,6 +179,7 @@ set src {
   terminal
   th_main
   timeline
+  timer
   tkt
   tktsetup
   undo

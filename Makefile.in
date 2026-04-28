@@ -71,7 +71,9 @@ SQLITE3_ORIGIN = @SQLITE3_ORIGIN@
 USE_LINENOISE = @USE_LINENOISE@
 USE_MMAN_H = @USE_MMAN_H@
 USE_SEE = @USE_SEE@
-APPNAME = fossil
+APPNAME = wyga-fossil
+# Fork: rebranded executable name only.  All in-app strings, command
+# names, log messages and the project's self-name remain "fossil".
 #
 # APPNAME = fossil-fuzz
 # may be more appropriate for fuzzing.

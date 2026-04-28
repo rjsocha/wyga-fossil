@@ -862,12 +862,19 @@ table.adminLogTable {
 }
 .brlist table th {
   text-align: left;
-  padding: 0px 1em 0.5ex 0px;
+  padding: 0px 1.2em 0.5ex 0px;   /* fork: ~+20% horizontal breathing room */
   vertical-align: bottom;
 }
 .brlist table td {
-  padding: 0px 2em 0px 0px;
+  padding: 0px 2.4em 0px 0px;     /* fork: ~+20% horizontal breathing room */
   white-space: nowrap;
+}
+/* Fork: widen the first column ("Name" in /wcontent) ~40% so wiki page
+** names get more room without crowding the timestamp/version columns. */
+.brlist table th:first-child,
+.brlist table td:first-child {
+  padding-right: 3.4em;
+  min-width: 14em;
 }
 th.sort:after {
   margin-left: .4em;

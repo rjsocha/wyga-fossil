@@ -169,11 +169,20 @@ int repo_list_page(void){
     pExclude = glob_create("*/proc,proc");
     vfile_scan(&base, blob_size(&base), 0, pExclude, 0, ExtFILE);
     glob_free(pExclude);
-    db_multi_exec("DELETE FROM sfile WHERE pathname NOT GLOB '*[^/].fossil'"
+    /* Fork also accepts the bare basename .fossil (a hidden dotfile
+    ** sitting in a per-project directory).  Upstream rejects that
+    ** with its star-bracket-slash-dotfossil pattern; we add the
+    ** star-slash-dotfossil and standalone-dotfossil cases below. */
+    db_multi_exec("DELETE FROM sfile WHERE NOT ("
+                  "pathname GLOB '*[^/].fossil'"
+                  " OR pathname GLOB '*/.fossil'"
+                  " OR pathname = '.fossil'"
 #if USE_SEE
-                  " AND pathname NOT GLOB '*[^/].efossil'"
+                  " OR pathname GLOB '*[^/].efossil'"
+                  " OR pathname GLOB '*/.efossil'"
+                  " OR pathname = '.efossil'"
 #endif
-    );
+                  ")");
     allRepo = 0;
   }
   n = db_int(0, "SELECT count(*) FROM sfile");

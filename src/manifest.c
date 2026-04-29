@@ -1066,6 +1066,7 @@ Manifest *manifest_parse(Blob *pContent, int rid, Blob *pErr){
          && fossil_strcmp(p->zTimerAction,"stop")!=0 ){
           SYNTAX("invalid Y-card action (must be 'start' or 'stop')");
         }
+        if( next_token(&x, 0)!=0 ) SYNTAX("extra tokens after Y-card action");
         if( p->type!=0 && p->type!=CFTYPE_TIMER ){
           SYNTAX("Y-card combined with cards from another artifact type");
         }

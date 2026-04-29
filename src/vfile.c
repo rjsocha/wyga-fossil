@@ -434,12 +434,13 @@ static int is_temporary_file(const char *zName){
 /*
 ** Values for the scanFlags parameter to vfile_scan().
 */
-#define SCAN_ALL    0x001    /* Includes files that begin with "." */
-#define SCAN_TEMP   0x002    /* Only Fossil-generated files like *-baseline */
-#define SCAN_NESTED 0x004    /* Scan for empty dirs in nested checkouts */
-#define SCAN_MTIME  0x008    /* Populate mtime column */
-#define SCAN_SIZE   0x010    /* Populate size column */
-#define SCAN_ISEXE  0x020    /* Populate isexe column */
+#define SCAN_ALL      0x001  /* Includes files that begin with "." */
+#define SCAN_TEMP     0x002  /* Only Fossil-generated files like *-baseline */
+#define SCAN_NESTED   0x004  /* Scan for empty dirs in nested checkouts */
+#define SCAN_MTIME    0x008  /* Populate mtime column */
+#define SCAN_SIZE     0x010  /* Populate size column */
+#define SCAN_ISEXE    0x020  /* Populate isexe column */
+#define SCAN_REPOLIST 0x040  /* Fork: also surface hidden ".fossil" repos */
 #endif /* INTERFACE */
 
 /*
@@ -518,15 +519,16 @@ void vfile_scan(
       char *zPath;
       char *zUtf8;
       if( pEntry->d_name[0]=='.' ){
-        /* Fork: always allow `.fossil` (and `.efossil` under SEE) so
-        ** the repolist scanner can discover hidden-basename repos
-        ** without forcing SCAN_ALL on its consumer. */
-        int isFossilDot =
+        /* Fork: surface `.fossil` (and `.efossil` under SEE) only when
+        ** the caller is the repolist scanner.  Other callers (add /
+        ** clean / status) keep upstream's blanket dot-skip so a stray
+        ** `.fossil` inside a checkout is NOT picked up for check-in. */
+        int isFossilDot = (scanFlags & SCAN_REPOLIST) && (
             (strcmp(pEntry->d_name, ".fossil")==0)
 #if USE_SEE
          || (strcmp(pEntry->d_name, ".efossil")==0)
 #endif
-            ;
+        );
         if( !isFossilDot ){
           if( (scanFlags & SCAN_ALL)==0 ) continue;
           if( pEntry->d_name[1]==0 ) continue;
@@ -652,15 +654,16 @@ int vfile_dir_scan(
       char *zPath;
       char *zUtf8;
       if( pEntry->d_name[0]=='.' ){
-        /* Fork: always allow `.fossil` (and `.efossil` under SEE) so
-        ** the repolist scanner can discover hidden-basename repos
-        ** without forcing SCAN_ALL on its consumer. */
-        int isFossilDot =
+        /* Fork: surface `.fossil` (and `.efossil` under SEE) only when
+        ** the caller is the repolist scanner.  Other callers (add /
+        ** clean / status) keep upstream's blanket dot-skip so a stray
+        ** `.fossil` inside a checkout is NOT picked up for check-in. */
+        int isFossilDot = (scanFlags & SCAN_REPOLIST) && (
             (strcmp(pEntry->d_name, ".fossil")==0)
 #if USE_SEE
          || (strcmp(pEntry->d_name, ".efossil")==0)
 #endif
-            ;
+        );
         if( !isFossilDot ){
           if( (scanFlags & SCAN_ALL)==0 ) continue;
           if( pEntry->d_name[1]==0 ) continue;

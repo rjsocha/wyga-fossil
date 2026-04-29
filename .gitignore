@@ -34,3 +34,7 @@
 *.fossil-journal
 *.fossil-shm
 *.fossil-wal
+
+# Personal learning notes (not part of the project)
+/LEARNING.md
+/SKILL.ROADMAP.md

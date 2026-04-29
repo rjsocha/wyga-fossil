@@ -2765,6 +2765,31 @@ void db_open_repository(const char *zDbName){
   sqlite3_file_control(g.db, "repository", SQLITE_FCNTL_DATA_VERSION,
                        &g.iRepoDataVers);
 
+  /* Fork: lazily create the fork-introduced tables on every open so
+  ** repos created by upstream fossil (or by an older build of this
+  ** fork) don't fatal-error the first time crosslink touches them.
+  ** Schema must stay in sync with the CREATE TABLE blocks in
+  ** src/schema.c -- bump them together. */
+  if( !db_table_exists("repository","timer") ){
+    db_multi_exec(
+      "CREATE TABLE IF NOT EXISTS repository.timer("
+      "  rid INTEGER PRIMARY KEY REFERENCES blob,"
+      "  start_mtime REAL NOT NULL,"
+      "  stop_rid INTEGER,"
+      "  stop_mtime REAL,"
+      "  comment TEXT"
+      ");"
+    );
+  }
+  if( !db_table_exists("repository","wiki_meta") ){
+    db_multi_exec(
+      "CREATE TABLE IF NOT EXISTS repository.wiki_meta("
+      "  name TEXT PRIMARY KEY,"
+      "  description TEXT"
+      ");"
+    );
+  }
+
   /* Cache "allow-symlinks" option, because we'll need it on every stat call */
   g.allowSymlinks = db_get_boolean("allow-symlinks",0);
 

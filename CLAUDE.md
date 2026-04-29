@@ -49,8 +49,11 @@ log.
   fossil HTTP sync (Resilio replicates the whole file).
 - **`fossil wiki create|commit` flags**:
   - `-b|--body TEXT` - inline content; mutually exclusive with FILE.
-    Backslash escapes (`\n`, `\r`, `\t`, `\0`, `\\`) are decoded so
-    agents can pass literal `\n` in their shell quoting.
+    Backslash escapes (`\n`, `\r`, `\t`, `\\`) are decoded so agents
+    can pass literal `\n` in their shell quoting.  `\0` is **not**
+    decoded - a NUL byte would silently truncate the artifact's
+    C-card content downstream, so a literal `\0` in `--body` passes
+    through unchanged.
   - `-d|--description TEXT` - saves into `wiki_meta` after commit.
 - **`fossil wiki desc PAGE [TEXT]`** - get/set/clear description.
 - **`fossil wiki index [--format md|plain]`** - machine-readable
@@ -92,10 +95,15 @@ repository file.  Multiple places had to be relaxed because upstream
 intentionally rejects that name:
 
 - `src/repolist.c` - the GLOB filter (`*[^/].fossil`) was widened
-  to also accept `*/.fossil` and standalone `.fossil`.
-- `src/vfile.c` - the dot-prefix skip in `vfile_scan` exempts
-  `.fossil` (and `.efossil` under SEE) so the repolist scanner
-  discovers hidden-basename repos without `SCAN_ALL`.
+  to also accept `*/.fossil` and standalone `.fossil`.  The
+  `vfile_scan` call passes the new `SCAN_REPOLIST` flag.
+- `src/vfile.c` - new `SCAN_REPOLIST` flag (0x040).  When set, the
+  dot-prefix skip in `vfile_scan` / `vfile_dscan` exempts `.fossil`
+  (and `.efossil` under SEE) so the repolist scanner discovers
+  hidden-basename repos without `SCAN_ALL`.  Without the flag (the
+  default for `add` / `clean` / `status`) upstream's blanket
+  dot-skip stays in force, so a stray `.fossil` in a checkout is
+  not picked up by check-in machinery.
 - `src/main.c` - the special-case "Assume any file with a basename
   of '.fossil' does not exist" was removed.
 
@@ -118,6 +126,17 @@ intentionally rejects that name:
 `src/default.css` - `.brlist table` cells got ~+20% horizontal
 padding overall, and the first column (`Name`) gets +40% extra so
 wiki names breathe.
+
+### Schema migration for fork-introduced tables
+
+`src/db.c::db_open_repository` runs `CREATE TABLE IF NOT EXISTS` for
+both `timer` and `wiki_meta` on every repository open.  This is a
+deliberate choice not to bump `AUX_SCHEMA_MAX`: bumping would force
+all upstream-created repos through `fossil rebuild`, which is heavy
+for a personal fork.  The lazy-create path is idempotent and cheap
+(SQLite returns immediately if the tables already exist), and keeps
+schema in `src/schema.c` as the source of truth - the strings in
+`db.c` must mirror it byte for byte if the columns ever change.
 
 ### Server defaults
 
@@ -176,6 +195,13 @@ one-shot cleanup as root:
 docker run --rm -v "$PWD:/src" -w /src --entrypoint sh fossil-builder \
     -c 'rm -rf bld fossil'
 ```
+
+For a fresh build + system install, `./install.sh` runs the builder
+under `--user "$(id -u):$(id -g)"` (so the artefact in the source
+tree stays user-owned), then runs the same image again *without*
+`--user` with `/usr/local/bin` bind-mounted at `/install` so the
+in-container root can `install -m 0755` the binary onto the host
+without sudo.  Override the destination with `DEST=...`.
 
 The host has musl-gcc and glibc-static libs, but **does not** have
 musl-versions of openssl/zlib, so a host-side musl build would fail.

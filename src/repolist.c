@@ -167,7 +167,7 @@ int repo_list_page(void){
     db_multi_exec("CREATE TABLE sfile(pathname TEXT);");
     db_multi_exec("CREATE TABLE vfile(pathname);");
     pExclude = glob_create("*/proc,proc");
-    vfile_scan(&base, blob_size(&base), 0, pExclude, 0, ExtFILE);
+    vfile_scan(&base, blob_size(&base), SCAN_REPOLIST, pExclude, 0, ExtFILE);
     glob_free(pExclude);
     /* Fork also accepts the bare basename .fossil (a hidden dotfile
     ** sitting in a per-project directory).  Upstream rejects that

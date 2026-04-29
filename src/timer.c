@@ -443,12 +443,20 @@ static void timer_rm_cmd(void){
       fossil_print("  skip %s - not a timer artifact\n", g.argv[i]);
       continue;
     }
-    /* Capture before purge for the audit message. */
-    zAct     = db_text(0, "SELECT action FROM timer WHERE rid=%d", rid);
-    zWhen    = db_text(0,
-                 "SELECT datetime(start_mtime) FROM timer WHERE rid=%d", rid);
+    /* Capture before purge for the audit message.  The user may pass
+    ** either a start RID (rid in timer.rid) or a stop RID (rid in
+    ** timer.stop_rid); resolve which by joining on either column. */
+    zAct = db_text(0,
+      "SELECT CASE WHEN rid=%d THEN 'start' WHEN stop_rid=%d THEN 'stop' END"
+      "  FROM timer WHERE rid=%d OR stop_rid=%d LIMIT 1",
+      rid, rid, rid, rid);
+    zWhen = db_text(0,
+      "SELECT datetime(CASE WHEN rid=%d THEN start_mtime ELSE stop_mtime END)"
+      "  FROM timer WHERE rid=%d OR stop_rid=%d LIMIT 1",
+      rid, rid, rid);
     zComment = db_text(0,
-                 "SELECT comment FROM timer WHERE rid=%d", rid);
+      "SELECT comment FROM timer WHERE rid=%d OR stop_rid=%d LIMIT 1",
+      rid, rid);
     if( timer_purge_one(rid, "fossil timer rm") ){
       zMsg = mprintf("timer: %s event at %s deleted%s%s",
                      zAct ? zAct : "?",

@@ -205,14 +205,23 @@ void home_page(void){
   {
     Stmt q;
     int hasAny = 0;
-    /* DISTINCT name dedups across versions/revisions of the same page. */
+    /* GROUP BY name dedups across versions/revisions of the same page.
+    ** A wiki page is "deleted" by writing an empty-body revision whose
+    ** tagxref.value+0 evaluates to 0, so filter on the latest-mtime row
+    ** per name -- exactly the same trick listAllWikiPages uses for
+    ** /wcontent.  Without this, deleted pages would still show up here. */
     db_prepare(&q,
-      "SELECT DISTINCT substr(t.tagname,6) AS name, "
-      "       (SELECT description FROM wiki_meta "
-      "         WHERE name=substr(t.tagname,6)) AS descr "
-      "  FROM tag t JOIN tagxref tx USING(tagid) "
-      " WHERE t.tagname GLOB 'wiki-*' "
-      "   AND TYPEOF(tx.value+0)='integer' "
+      "SELECT name, descr FROM ("
+      "  SELECT substr(t.tagname,6) AS name, "
+      "         (SELECT description FROM wiki_meta "
+      "           WHERE name=substr(t.tagname,6)) AS descr, "
+      "         tx.value+0 AS wrid, "
+      "         max(tx.mtime) AS wmtime "
+      "    FROM tag t JOIN tagxref tx USING(tagid) "
+      "   WHERE t.tagname GLOB 'wiki-*' "
+      "     AND TYPEOF(wrid)='integer' "
+      "   GROUP BY name "
+      ") WHERE wrid!=0 "
       " ORDER BY name COLLATE NOCASE");
     while( db_step(&q)==SQLITE_ROW ){
       const char *zName = db_column_text(&q, 0);
@@ -2606,8 +2615,10 @@ void wiki_cmd(void){
       ** everything in one shell line: fossil wiki create NAME --body TEXT.
       ** Common backslash escapes are decoded so callers don't have to
       ** wrestle with their shell's quoting to insert newlines:
-      **   \n -> LF, \r -> CR, \t -> TAB, \0 -> NUL, \\ -> backslash.
-      ** Anything else after a backslash is passed through verbatim. */
+      **   \n -> LF, \r -> CR, \t -> TAB, \\ -> backslash.
+      ** \0 is intentionally NOT decoded -- a NUL would silently truncate
+      ** the artifact content downstream.  Anything else after a backslash
+      ** (including a literal "\0") is passed through verbatim. */
       Blob decoded = empty_blob;
       const char *p = zBody;
       while( *p ){
@@ -2617,7 +2628,6 @@ void wiki_cmd(void){
             case 'n':  blob_append_char(&decoded, '\n'); break;
             case 'r':  blob_append_char(&decoded, '\r'); break;
             case 't':  blob_append_char(&decoded, '\t'); break;
-            case '0':  blob_append_char(&decoded, '\0'); break;
             case '\\': blob_append_char(&decoded, '\\'); break;
             default:
               blob_append_char(&decoded, '\\');

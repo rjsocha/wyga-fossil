@@ -4,12 +4,17 @@ Personal fork of [Fossil-SCM](https://fossil-scm.org) extended with
 native time tracking and a handful of CLI / UI ergonomics tweaks
 aimed at LLM-agent-driven workflows.
 
-> **Status: work in progress / experimental.**  The maintainer is
-> shaping the tool around a personal workflow.  Changes are not
-> well-tested, design decisions are not necessarily right or stable,
-> and breaking changes can land at any time.  Treat this as an
-> experiment, not a product.  Do not rely on it for anything you
-> care about losing.
+> **Status: vibe-coded experiment, not a product.**  The fork's custom
+> code was written largely through pair-coding with an LLM agent,
+> driven by the maintainer's day-to-day usage rather than a formal
+> design or test plan.  There is no automated test suite for the new
+> features; correctness has been validated only by running the binary
+> against the maintainer's own workflow.  This is **not** the output
+> of a full AI engineering pipeline (no CI gates, no fuzzing, no
+> structured review) - it's one person iterating with a coding
+> assistant.  Design decisions are not necessarily right or stable,
+> and breaking changes can land at any time.  Do not rely on this
+> binary for anything you cannot afford to lose.
 
 The executable is named `wyga-fossil` (via `Makefile.in::APPNAME`),
 but otherwise the application identifies itself as fossil internally
@@ -81,6 +86,23 @@ Override the CMD if you want to skip post-processing:
 docker run --rm --user "$(id -u):$(id -g)" \
     -v "$PWD:/src" -w /src wyga-fossil-builder \
     sh -c 'make clean && ./configure --static && make -j$(nproc)'
+```
+
+## Install
+
+`install.sh` builds the binary and copies it to `/usr/local/bin/wyga-fossil`
+through a second container run that has root inside the container, so no
+`sudo` on the host is required:
+
+```bash
+./install.sh
+```
+
+Override the destination with the `DEST` env var (must be an existing
+directory):
+
+```bash
+DEST=$HOME/.local/bin ./install.sh
 ```
 
 ## License
